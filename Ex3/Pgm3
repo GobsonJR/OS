@@ -1,0 +1,76 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/wait.h>
+
+#define SIZE 10
+
+struct shared {
+    int buffer[SIZE];
+    int in;
+    int out;
+    int count;
+};
+
+int main() {
+    int i, shmid, num;
+    struct shared *shm;
+
+    // Allocate shared memory segment using IPC_PRIVATE
+    shmid = shmget(IPC_PRIVATE, sizeof(struct shared), IPC_CREAT | 0666);
+    if (shmid < 0) {
+        printf("Shared memory creation failed\n");
+        exit(1);
+    }
+
+    shm = (struct shared *)shmat(shmid, NULL, 0);
+    shm->in = 0;
+    shm->out = 0;
+    shm->count = 0;
+
+    pid_t pid = fork();
+
+    if (pid == 0) {
+        // Child Process: Producer
+        printf("Producer (Child) Started:\n");
+        for (i = 0; i < SIZE; i++) {
+            if (shm->count == SIZE) {
+                printf("Buffer Full\n");
+                break;
+            }
+            
+            printf("Enter data [%d/%d]: ", i + 1, SIZE);
+            fflush(stdout);
+            if (scanf("%d", &num) != 1) {
+                break; // Exit if bad input or EOF
+            }
+
+            shm->buffer[shm->in] = num;
+            printf("Produced %d at index %d\n", num, shm->in);
+            
+            shm->in = (shm->in + 1) % SIZE;
+            shm->count++;
+        }
+        shmdt(shm);
+        exit(0);
+    }
+    else {
+        // Parent Process: Consumer
+        // Wait for the child (Producer) to finish gathering all user inputs
+        wait(NULL); 
+        
+        printf("\nConsumer (Parent) Reading Data:\n");
+        while (shm->count > 0) {
+            printf("Consumed %d from index %d\n", shm->buffer[shm->out], shm->out);
+            shm->out = (shm->out + 1) % SIZE;
+            shm->count--;
+        }
+        
+        shmdt(shm);
+        shmctl(shmid, IPC_RMID, NULL);
+    }
+
+    return 0;
+}
